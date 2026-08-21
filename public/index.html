@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>VIGO Miner</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+
+<div id="boot" class="boot">
+  <div class="boot__coin">⛏️</div>
+  <div class="boot__title">VIGO Miner</div>
+  <div class="boot__bar"><span></span></div>
+  <div class="boot__msg" id="boot-msg">Connecting to the mine…</div>
+</div>
+
+<div id="app" class="app" hidden>
+
+  <!-- ================= MINE ================= -->
+  <section class="screen" data-screen="mine">
+    <header class="topbar">
+      <div class="profile">
+        <div class="avatar" id="avatar"></div>
+        <div>
+          <div class="profile__name" id="profile-name">Miner</div>
+          <div class="profile__league" id="profile-league">Wooden</div>
+        </div>
+      </div>
+      <button class="chip" id="daily-btn">
+        <span class="chip__icon">🎁</span>
+        <span class="chip__text">Daily</span>
+        <span class="chip__dot" id="daily-dot" hidden></span>
+      </button>
+    </header>
+
+    <div class="balance">
+      <div class="balance__row">
+        <span class="coin coin--sm"></span>
+        <span class="balance__value" id="balance">0</span>
+      </div>
+      <button class="profit" id="profit-btn">
+        <span id="profit-per-hour">0</span> VIGO / hour
+        <span class="profit__info">?</span>
+      </button>
+    </div>
+
+    <div class="league-bar">
+      <div class="league-bar__labels">
+        <span id="league-name">Wooden</span>
+        <span id="league-next">Bronze</span>
+      </div>
+      <div class="league-bar__track"><div class="league-bar__fill" id="league-fill"></div></div>
+    </div>
+
+    <div class="tap-area">
+      <button class="tap-coin" id="tap-coin" aria-label="Tap to mine VIGO">
+        <span class="tap-coin__glow"></span>
+        <span class="tap-coin__face">
+          <span class="tap-coin__mark">V</span>
+        </span>
+      </button>
+      <div class="floaters" id="floaters" aria-hidden="true"></div>
+    </div>
+
+    <div class="energy">
+      <div class="energy__head">
+        <span class="energy__label">⚡ <b id="energy">0</b> / <span id="energy-max">1000</span></span>
+        <span class="energy__power" id="tap-power-label">+1 / tap</span>
+      </div>
+      <div class="energy__track"><div class="energy__fill" id="energy-fill"></div></div>
+    </div>
+
+    <div class="quick-boosters">
+      <button class="qb" id="qb-energy">
+        <span class="qb__icon">🔋</span>
+        <span class="qb__body"><b>Full Energy</b><small id="qb-energy-left">6 left</small></span>
+      </button>
+      <button class="qb" id="qb-turbo">
+        <span class="qb__icon">🚀</span>
+        <span class="qb__body"><b>Turbo</b><small id="qb-turbo-left">3 left</small></span>
+      </button>
+    </div>
+  </section>
+
+  <!-- ================= BOOST ================= -->
+  <section class="screen" data-screen="boost" hidden>
+    <div class="screen__head">
+      <h1>Boosters</h1>
+      <p class="muted">Balance <b id="boost-balance">0</b> VIGO</p>
+    </div>
+
+    <h2 class="section-title">Free daily boosters</h2>
+    <div class="list" id="daily-boosters"></div>
+
+    <h2 class="section-title">Permanent upgrades</h2>
+    <div class="list" id="boost-list"></div>
+  </section>
+
+  <!-- ================= RIGS ================= -->
+  <section class="screen" data-screen="rigs" hidden>
+    <div class="screen__head">
+      <h1>Your mine</h1>
+      <p class="muted">Balance <b id="rigs-balance">0</b> VIGO · <b id="rigs-pph">0</b>/hour</p>
+    </div>
+    <div class="tabs" id="card-categories"></div>
+    <div class="cards" id="card-list"></div>
+  </section>
+
+  <!-- ================= FRIENDS ================= -->
+  <section class="screen" data-screen="friends" hidden>
+    <div class="screen__head">
+      <h1>Friends</h1>
+      <p class="muted">Earn a bonus for every miner you bring in.</p>
+    </div>
+
+    <div class="invite-card">
+      <div class="invite-card__row"><span>You get</span><b id="ref-inviter">+5,000</b></div>
+      <div class="invite-card__row"><span>Your friend gets</span><b id="ref-invitee">+2,500</b></div>
+      <div class="invite-card__row"><span>Telegram Premium friend</span><b id="ref-premium">+25,000</b></div>
+      <div class="invite-card__row"><span>Share of their taps</span><b id="ref-share">10%</b></div>
+    </div>
+
+    <div class="invite-actions">
+      <button class="btn btn--primary" id="invite-btn">Invite a friend</button>
+      <button class="btn btn--ghost" id="copy-btn">Copy link</button>
+    </div>
+
+    <h2 class="section-title">Your miners (<span id="ref-count">0</span>) · earned <b id="ref-earned">0</b></h2>
+    <div class="list" id="friend-list"></div>
+  </section>
+
+  <!-- ================= TOP ================= -->
+  <section class="screen" data-screen="top" hidden>
+    <div class="screen__head">
+      <h1>Leaderboard</h1>
+      <p class="muted"><b id="player-count">0</b> miners competing</p>
+    </div>
+    <div class="list" id="leaderboard"></div>
+  </section>
+
+  <nav class="nav">
+    <button class="nav__item is-active" data-tab="mine"><span>⛏️</span>Mine</button>
+    <button class="nav__item" data-tab="boost"><span>🚀</span>Boost</button>
+    <button class="nav__item" data-tab="rigs"><span>🏭</span>Rigs</button>
+    <button class="nav__item" data-tab="friends"><span>🤝</span>Friends</button>
+    <button class="nav__item" data-tab="top"><span>🏆</span>Top</button>
+  </nav>
+</div>
+
+<!-- Sheet used for daily rewards, offline earnings and info popups -->
+<div class="sheet" id="sheet" hidden>
+  <div class="sheet__backdrop" data-close></div>
+  <div class="sheet__panel">
+    <button class="sheet__close" data-close aria-label="Close">×</button>
+    <div id="sheet-content"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="/app.js" type="module"></script>
+</body>
+</html>
