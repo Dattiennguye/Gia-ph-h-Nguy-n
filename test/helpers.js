@@ -1,0 +1,112 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+
+/** Mỗi tệp test dùng một cơ sở dữ liệu riêng, xoá sạch khi chạy xong. */
+export function useTempDb(name) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `vigo-${name}-`));
+  process.env.DB_PATH = path.join(dir, 'test.db');
+  process.env.SESSION_SECRET = 'test-secret-0123456789abcdef';
+  process.env.PII_ENCRYPTION_KEY = 'a'.repeat(64);
+  process.env.EXPOSE_OTP = '1';
+  process.env.NODE_ENV = 'test';
+  process.env.PAYMENT_PROVIDER = 'mock';
+  // Bộ kiểm thử tạo hàng chục tài khoản từ cùng một địa chỉ IP.
+  process.env.RATE_LIMIT_FACTOR = '100';
+  return dir;
+}
+
+/** Máy chủ thật trên cổng ngẫu nhiên, gọi qua HTTP như một client thật. */
+export async function startServer() {
+  const { bootstrap, createApp } = await import('../src/index.js');
+  bootstrap();
+  const app = createApp();
+  const server = app.listen(0);
+  await new Promise((r) => server.once('listening', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  const call = async (method, path, { body, token } = {}) => {
+    const res = await fetch(`${base}/api${path}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+    let data = null;
+    try { data = await res.json(); } catch { data = null; }
+    return { status: res.status, data };
+  };
+
+  return {
+    base,
+    server,
+    get: (p, o) => call('GET', p, o),
+    post: (p, body, o) => call('POST', p, { body, ...o }),
+    patch: (p, body, o) => call('PATCH', p, { body, ...o }),
+    del: (p, o) => call('DELETE', p, o),
+    close: () => new Promise((r) => server.close(r)),
+  };
+}
+
+let counter = 0;
+
+/** Tạo một người dùng đã xác minh, có hồ sơ và nhu cầu đầy đủ. */
+export async function makeUser(api, overrides = {}) {
+  counter += 1;
+  const n = counter;
+  const email = `user${n}.${Date.now()}@test.vn`;
+  const phone = `09${String(10000000 + n).slice(0, 8)}`;
+
+  const reg = await api.post('/auth/register', {
+    method: 'email',
+    email,
+    password: 'matkhau123',
+    display_name: overrides.display_name ?? `Người dùng ${n}`,
+  });
+  if (reg.status !== 201) throw new Error(`Đăng ký thất bại: ${JSON.stringify(reg.data)}`);
+  const token = reg.data.token;
+
+  const sent = await api.post('/auth/phone/send-otp', { phone }, { token });
+  await api.post('/auth/phone/verify', { phone, code: sent.data.code }, { token });
+
+  const profile = {
+    birth_date: overrides.birth_date ?? '1998-05-10',
+    gender: overrides.gender ?? 'male',
+    relationship_goal: overrides.relationship_goal ?? 'marriage',
+    marriage_timeline: overrides.marriage_timeline ?? 'asap',
+    children_wish: overrides.children_wish ?? 'want',
+    living_preference: overrides.living_preference ?? 'near_family',
+    smoking: overrides.smoking ?? 'never',
+    drinking: overrides.drinking ?? 'occasionally',
+    marital_status: 'single',
+    education: overrides.education ?? 'bachelor',
+    lifestyle_tags: overrides.lifestyle_tags ?? ['homebody', 'travel'],
+    interest_tags: overrides.interest_tags ?? ['music', 'coffee'],
+    seriousness: overrides.seriousness ?? 5,
+    ...(overrides.region_id ? { region_id: overrides.region_id } : {}),
+  };
+  await api.patch('/profile', profile, { token });
+
+  if (overrides.lat != null) {
+    await api.post('/profile/location', { lat: overrides.lat, lng: overrides.lng }, { token });
+  }
+
+  await api.patch('/profile/preference', {
+    interested_in: overrides.interested_in ?? ['female'],
+    age_min: overrides.age_min ?? 20,
+    age_max: overrides.age_max ?? 40,
+    max_distance_km: overrides.max_distance_km ?? 50,
+    relationship_goals: overrides.relationship_goals ?? ['marriage', 'partner'],
+  }, { token });
+
+  const me = await api.get('/auth/me', { token });
+  return { id: me.data.user.id, token, email, phone };
+}
+
+/** Lấy id một khu vực theo mã (ví dụ: 'viet-nam.ha-noi.thuong-tin'). */
+export async function regionIdByCode(code) {
+  const { get } = await import('../src/db/index.js');
+  return get('SELECT id FROM regions WHERE code = ?', [code])?.id;
+}

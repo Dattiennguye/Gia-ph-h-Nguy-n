@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vigo Match — Quản trị</title>
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛠️</text></svg>">
+<style>
+  :root { --max: 1180px; }
+  body { background: var(--bg); }
+  #app { max-width: var(--max); padding: 0 16px 60px; }
+  .admin-head {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 16px 0; border-bottom: 1px solid var(--border); margin-bottom: 18px;
+  }
+  .admin-head h1 { margin: 0; font-size: 1.25rem; flex: 1; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 20px; }
+  .tabs button {
+    border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
+    border-radius: 99px; padding: 7px 15px; cursor: pointer; font: inherit; font-size: .88rem;
+  }
+  .tabs button.on { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
+  .kpi { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 22px; }
+  .kpi .box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+  .kpi .box b { display: block; font-size: 1.7rem; line-height: 1.15; }
+  .kpi .box span { font-size: .8rem; color: var(--text-2); }
+  .kpi .box.alert b { color: var(--danger); }
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); font-size: .88rem; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--surface-2); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-2); }
+  tr:last-child td { border-bottom: 0; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: .74rem; font-weight: 600; }
+  .pill.active { background: var(--accent-soft); color: var(--accent); }
+  .pill.suspended { background: var(--warn-soft); color: var(--warn); }
+  .pill.banned, .pill.high { background: var(--danger-soft); color: var(--danger); }
+  .pill.medium { background: var(--warn-soft); color: var(--warn); }
+  .pill.low { background: var(--surface-2); color: var(--text-2); }
+  .chart { display: flex; align-items: flex-end; gap: 3px; height: 130px; padding: 10px 0; }
+  .chart .bar { flex: 1; background: var(--brand); border-radius: 3px 3px 0 0; min-height: 2px; position: relative; opacity: .85; }
+  .chart .bar:hover { opacity: 1; }
+  .toolbar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  .toolbar input, .toolbar select { width: auto; flex: 0 1 220px; }
+</style>
+</head>
+<body>
+<div id="app"><div class="spinner"></div></div>
+<script type="module" src="/admin.js"></script>
+</body>
+</html>
