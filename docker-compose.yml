@@ -1,0 +1,34 @@
+services:
+  vigo-match:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      # BẮT BUỘC đổi trước khi chạy thật. Sinh khoá:
+      #   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+      SESSION_SECRET: ${SESSION_SECRET:?can dat SESSION_SECRET}
+      PII_ENCRYPTION_KEY: ${PII_ENCRYPTION_KEY:?can dat PII_ENCRYPTION_KEY}
+
+      # Nhà cung cấp SMS thật. Để 'console' thì mã OTP chỉ in ra log.
+      SMS_PROVIDER: ${SMS_PROVIDER:-console}
+      SMS_WEBHOOK_URL: ${SMS_WEBHOOK_URL:-}
+      SMS_WEBHOOK_TOKEN: ${SMS_WEBHOOK_TOKEN:-}
+
+      # Tài khoản quản trị đầu tiên, tạo tự động khi khởi động.
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@vigomatch.vn}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+
+      # Tuỳ chọn: bật phần nhận xét bằng lời của AI Matchmaker.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-manual}
+      PAYMENT_BANK_ACCOUNT: ${PAYMENT_BANK_ACCOUNT:-}
+    volumes:
+      - vigo-data:/app/data
+      - vigo-uploads:/app/uploads
+
+volumes:
+  vigo-data:
+  vigo-uploads:

@@ -8,6 +8,7 @@ import { errorHandler } from './lib/http.js';
 import { attachUser } from './middleware/auth.js';
 import { expireSubscriptions } from './services/billing.js';
 import { hashPassword } from './lib/crypto.js';
+import { uploadDir } from './lib/images.js';
 
 import { authRouter } from './routes/auth.js';
 import { profileRouter } from './routes/profile.js';
@@ -62,12 +63,36 @@ export function createApp() {
   app.disable('x-powered-by');
   app.use(express.json({ limit: '2mb' }));
 
-  // Tiêu đề bảo mật cơ bản.
+  // Tiêu đề bảo mật.
+  //
+  // CSP khoá chặt: không script từ bên ngoài, không nhúng vào iframe, không gửi
+  // dữ liệu đi đâu khác ngoài chính máy chủ này. Ảnh cho phép data: vì ảnh đại
+  // diện được nhúng trực tiếp, nhưng KHÔNG cho phép ảnh từ tên miền lạ — tránh
+  // việc một người đặt ảnh trỏ sang máy chủ của họ để ghi lại IP người xem.
+  const CSP = [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "connect-src 'self'",
+    "font-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join('; ');
+
   app.use((req, res, next) => {
+    res.setHeader('Content-Security-Policy', CSP);
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'same-origin');
     res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Permissions-Policy', 'geolocation=(self)');
+    res.setHeader('Permissions-Policy', 'geolocation=(self), camera=(self), microphone=()');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    // Chỉ bật HSTS khi chạy thật qua HTTPS — bật lúc dev sẽ khoá luôn localhost.
+    if (config.isProd) {
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
     next();
   });
 
@@ -85,6 +110,21 @@ export function createApp() {
   app.use('/api', (req, res) => {
     res.status(404).json({ error: 'not_found', message: `Không có endpoint ${req.method} ${req.originalUrl}` });
   });
+
+  // Ảnh người dùng. `Content-Disposition: attachment` để trình duyệt không bao
+  // giờ hiển thị tệp như một tài liệu — tệp tải lên chỉ được dùng làm <img>.
+  app.use(
+    '/uploads',
+    express.static(uploadDir, {
+      maxAge: '7d',
+      index: false,
+      dotfiles: 'deny',
+      setHeaders: (res) => {
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+      },
+    })
+  );
 
   app.use(express.static(path.join(here, '..', 'public'), { extensions: ['html'] }));
   app.get('*', (req, res) => {

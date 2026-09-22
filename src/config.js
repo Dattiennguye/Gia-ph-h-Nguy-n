@@ -34,6 +34,9 @@ export const config = {
   isProd,
   port: num(process.env.PORT, 3000),
   dbPath: path.resolve(process.env.DB_PATH || './data/vigo-match.db'),
+  // Nơi lưu ảnh người dùng tải lên. Khi chạy nhiều máy chủ, trỏ vào ổ đĩa dùng
+  // chung hoặc thay bằng lưu trữ đối tượng trong src/lib/images.js.
+  uploadDir: process.env.UPLOAD_DIR || './uploads',
 
   sessionSecret: requiredSecret('SESSION_SECRET', devSeed),
   sessionTtlMs: num(process.env.SESSION_TTL_DAYS, 30) * 86400000,
@@ -50,7 +53,10 @@ export const config = {
   otp: {
     ttlMs: num(process.env.OTP_TTL_SECONDS, 300) * 1000,
     maxAttempts: num(process.env.OTP_MAX_ATTEMPTS, 5),
-    expose: bool(process.env.EXPOSE_OTP, !isProd),
+    // Ở môi trường thật thì KHÔNG BAO GIỜ trả mã OTP qua API, kể cả khi biến
+    // môi trường được đặt — tránh trường hợp ai đó sao chép nguyên .env.example
+    // lên máy chủ thật rồi vô tình biến mọi số điện thoại thành cửa sau.
+    expose: isProd ? false : bool(process.env.EXPOSE_OTP, true),
   },
 
   // Hệ số nhân cho mọi giới hạn tần suất. Để 1 khi chạy thật; bộ kiểm thử

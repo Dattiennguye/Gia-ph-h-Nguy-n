@@ -28,7 +28,7 @@ phải biên dịch gì.
 động lại; tài khoản quản trị sẽ được tạo tự động, truy cập tại `/admin.html`.
 
 ```bash
-npm test      # 75 bài kiểm thử
+npm test      # 94 bài kiểm thử
 npm run reset # xoá sạch dữ liệu
 ```
 
@@ -216,13 +216,16 @@ src/
     taxonomy.js         toàn bộ lựa chọn, dùng chung server ↔ client
   services/             nghiệp vụ, chạm DB
   routes/               tầng HTTP: kiểm tra đầu vào, gọi service
-  lib/                  crypto · geo · validate · rateLimit · events(SSE) · ai
+  lib/                  crypto · geo · validate · rateLimit · events(SSE) · ai · images
   middleware/auth.js    phiên, xác minh SĐT, phân quyền
 
 public/                 giao diện, không build
 data/regions.vn.js      địa giới Việt Nam kèm toạ độ
+uploads/                ảnh người dùng (ngoài git, gắn volume khi chạy Docker)
+Dockerfile              image production, chạy bằng user không phải root
+docker-compose.yml      bắt buộc khai báo khoá bí mật, kèm volume dữ liệu
 scripts/seed.js         sinh dữ liệu mẫu
-test/                   75 bài kiểm thử
+test/                   94 bài kiểm thử
 ```
 
 ---
@@ -312,19 +315,40 @@ Tất cả dưới `/api`. Xác thực bằng `Authorization: Bearer <token>`.
 | OTP | băm trước khi lưu, có hạn dùng, giới hạn số lần thử |
 | Giới hạn tần suất | lưu trong SQLite, sống sót qua khởi động lại |
 | SQL | tham số hoá toàn bộ, không nối chuỗi |
-| Vị trí | toạ độ không rời máy chủ; khu vực lùi cấp; khoảng cách làm tròn |
+| Vị trí | toạ độ không rời máy chủ, **kể cả với quản trị viên**; khu vực lùi cấp; khoảng cách làm tròn |
+| Token | chỉ đọc từ tiêu đề `Authorization`; riêng SSE được phép dùng query vì `EventSource` không đặt được tiêu đề |
+| Ảnh | chỉ nhận PNG/JPEG/WebP/GIF, **kiểm tra byte đầu tệp**, từ chối SVG và ảnh từ tên miền khác; lưu ra tệp, DB chỉ giữ đường dẫn |
+| Tiêu đề | CSP khoá script về cùng nguồn, `frame-ancestors none`, `object-src none`, HSTS khi chạy thật |
+| Xem hồ sơ | chỉ mở với người đang hoạt động và để công khai, hoặc người đã kết đôi; mọi từ chối trả cùng một lỗi "không tìm thấy" |
 | Liệt kê tài khoản | phản hồi giống hệt nhau dù tài khoản có tồn tại hay không |
 | Kiểm toán | mọi hành động quản trị đều được ghi lại kèm người thực hiện |
 
 Khi chạy thật (`NODE_ENV=production`), máy chủ **từ chối khởi động** nếu chưa đặt
-`SESSION_SECRET` và `PII_ENCRYPTION_KEY`, và `EXPOSE_OTP` tự động tắt.
+`SESSION_SECRET` và `PII_ENCRYPTION_KEY`. `EXPOSE_OTP` bị vô hiệu hoá hoàn toàn ở
+chế độ này — kể cả khi biến môi trường còn sót lại trong tệp `.env`.
+
+### Rà soát bảo mật
+
+Sau khi hoàn thành, toàn bộ ứng dụng được rà soát lại bằng cách **tấn công thử
+vào máy chủ đang chạy**. Bảy vấn đề tìm thấy đã được vá, mỗi vấn đề kèm một bài
+kiểm thử để không tái diễn (`test/security.test.js`):
+
+| Vấn đề | Đã xử lý |
+| --- | --- |
+| Biết id là xem được hồ sơ **đang ẩn** hoặc **đã bị khoá** | Chỉ mở với người đang hoạt động + công khai, hoặc đã kết đôi |
+| Token dùng được qua `?token=` ở mọi endpoint (lọt vào log, lịch sử trình duyệt) | Chỉ còn đúng route SSE |
+| Chấp nhận ảnh **SVG** — tài liệu chạy được script | Từ chối SVG; kiểm tra byte đầu tệp, không tin phần mở rộng |
+| Chấp nhận ảnh trỏ sang tên miền khác | Từ chối — tránh việc đặt ảnh để ghi lại IP người xem hồ sơ |
+| Thiếu `Content-Security-Policy` và HSTS | Đã thêm, khoá script về cùng nguồn |
+| Quản trị viên thấy **toạ độ chính xác** của người dùng | Chỉ còn tên khu vực |
+| Ảnh quá lớn / JSON hỏng trả lỗi 500 "lỗi máy chủ" | Trả 413 và 400 kèm thông báo đọc được |
 
 ---
 
 ## Kiểm thử
 
 ```
-npm test    # 75 bài, ~2 giây
+npm test    # 94 bài, ~2 giây
 ```
 
 | Tệp | Nội dung |
@@ -336,6 +360,7 @@ npm test    # 75 bài, ~2 giây
 | `moderation.test.js` | chặn tin lừa đảo, tự động tạm khoá, khôi phục, phân quyền, kiểm toán |
 | `preference.test.js` | tác động của tiêu chí, thử nghiệm thay đổi, gói dịch vụ, xác minh |
 | `ratelimit.test.js` | chống thử mật khẩu và spam OTP |
+| `security.test.js` | quyền xem hồ sơ, token trong URL, ảnh độc hại, tiêu đề bảo mật, rò rỉ cho quản trị viên |
 
 Mỗi tệp dùng một cơ sở dữ liệu riêng và gọi qua HTTP như một client thật.
 
@@ -369,6 +394,52 @@ Các điểm cần thay trước khi mở cho người dùng thật:
    thiết kế.
 6. **Mở khu vực** — đừng mở toàn quốc ngay. Dùng bảng mật độ trong trang quản trị,
    mở từng tỉnh khi tỷ lệ giới tính đủ cân.
+
+---
+
+## Triển khai
+
+### Docker (khuyến nghị)
+
+```bash
+export SESSION_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+export PII_ENCRYPTION_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+export ADMIN_PASSWORD='mat-khau-quan-tri-cua-ban'
+
+docker compose up -d --build
+```
+
+`docker-compose.yml` **bắt buộc** phải có `SESSION_SECRET` và `PII_ENCRYPTION_KEY`
+— thiếu thì container không khởi động, thay vì âm thầm chạy bằng khoá mặc định.
+
+Hai volume cần sao lưu:
+
+| Volume | Chứa gì |
+| --- | --- |
+| `vigo-data` | cơ sở dữ liệu SQLite |
+| `vigo-uploads` | ảnh người dùng tải lên |
+
+> ⚠️ Mất `PII_ENCRYPTION_KEY` là **không thể giải mã lại** dữ liệu giấy tờ đã lưu.
+> Hãy cất khoá này ở nơi an toàn, tách khỏi bản sao lưu cơ sở dữ liệu.
+
+### Chạy trực tiếp
+
+```bash
+NODE_ENV=production \
+SESSION_SECRET=... PII_ENCRYPTION_KEY=... \
+node src/index.js
+```
+
+Đặt sau một reverse proxy có HTTPS (Caddy, nginx, Cloudflare). Ứng dụng đã bật
+`trust proxy` nên `X-Forwarded-For` được dùng đúng cho giới hạn tần suất.
+
+### Sao lưu
+
+```bash
+# SQLite ở chế độ WAL — dùng lệnh backup, đừng copy tệp đang chạy
+docker compose exec vigo-match \
+  node -e "new (require('node:sqlite').DatabaseSync)(process.env.DB_PATH).exec(\"VACUUM INTO '/app/data/backup.db'\")"
+```
 
 ---
 

@@ -30,10 +30,13 @@ export function unreadCount(userId) {
 
 export function markRead(userId, ids = null) {
   if (ids?.length) {
-    const marks = ids.map(() => '?').join(',');
+    // Giới hạn độ dài để một request không dựng được câu SQL khổng lồ.
+    const safeIds = ids.slice(0, 200).map(Number).filter(Number.isInteger);
+    if (!safeIds.length) return { unread: unreadCount(userId) };
+    const marks = safeIds.map(() => '?').join(',');
     run(
       `UPDATE notifications SET read_at = ? WHERE user_id = ? AND id IN (${marks}) AND read_at IS NULL`,
-      [now(), userId, ...ids]
+      [now(), userId, ...safeIds]
     );
   } else {
     run('UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL', [

@@ -43,11 +43,9 @@ profileRouter.post(
 profileRouter.post(
   '/photos',
   wrap((req, res) => {
-    const url = v.str(req.body?.url, 'url', { max: 2000 });
-    if (!/^(https?:\/\/|data:image\/)/.test(url)) {
-      throw badRequest('Đường dẫn ảnh không hợp lệ');
-    }
-    res.status(201).json({ photo: profiles.addPhoto(req.user.id, url) });
+    // Việc kiểm tra định dạng/dung lượng nằm trong addPhoto, để mọi lối vào
+    // đều đi qua cùng một bộ luật.
+    res.status(201).json({ photo: profiles.addPhoto(req.user.id, req.body?.url) });
   })
 );
 

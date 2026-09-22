@@ -120,9 +120,18 @@ export function userDetail(userId) {
   if (!u) throw notFound('Không tìm thấy người dùng');
   const { password_hash, ...safe } = u;
 
+  // Quản trị viên cần biết người dùng ở khu vực nào, không cần toạ độ chính
+  // xác. Bỏ lat/lng ra khỏi response để một tài khoản quản trị bị chiếm quyền
+  // không kéo theo việc lộ vị trí nhà của toàn bộ người dùng.
+  const { lat, lng, ...profile } = loadProfile(userId) ?? {};
+
   return {
     user: safe,
-    profile: loadProfile(userId),
+    profile: {
+      ...profile,
+      area: profile.region_id ? publicRegionLabel(profile.region_id) : null,
+      coordinates: 'ẩn',
+    },
     verifications: all(
       'SELECT id, type, status, review_note, created_at, reviewed_at FROM verifications WHERE user_id = ?',
       [userId]

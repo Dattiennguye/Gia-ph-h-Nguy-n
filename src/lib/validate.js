@@ -107,3 +107,44 @@ export function bool(value, field, fallback = false) {
   if (value === 'false' || value === 0 || value === '0') return false;
   throw badRequest(`"${field}" phải là true hoặc false`);
 }
+
+/**
+ * Ảnh do người dùng gửi lên.
+ *
+ * Chỉ nhận hai dạng:
+ *   - data URI của ảnh bitmap (png/jpeg/webp/gif)
+ *   - đường dẫn tương đối trên chính máy chủ này (/uploads/...)
+ *
+ * SVG bị từ chối thẳng: nó là tài liệu XML chạy được script, và chỉ cần một
+ * người mở ảnh ở tab riêng là thành lỗ hổng XSS.
+ *
+ * URL trỏ ra tên miền khác cũng bị từ chối: nếu cho phép, một người có thể đặt
+ * ảnh đại diện trỏ về máy chủ của họ và ghi lại địa chỉ IP của mọi người xem
+ * hồ sơ mình.
+ */
+const IMAGE_DATA_URI = /^data:image\/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/]+={0,2})$/;
+const LOCAL_PATH = /^\/uploads\/[A-Za-z0-9._-]+$/;
+
+export function imageUrl(value, field = 'url', { maxBytes = 1_500_000 } = {}) {
+  const s = String(value ?? '').trim();
+  if (!s) throw badRequest(`Thiếu "${field}"`);
+
+  if (LOCAL_PATH.test(s)) return s;
+
+  const m = IMAGE_DATA_URI.exec(s);
+  if (!m) {
+    if (/^data:image\/svg/i.test(s)) {
+      throw badRequest('Không hỗ trợ ảnh SVG. Hãy dùng ảnh PNG, JPEG hoặc WebP.');
+    }
+    if (/^https?:/i.test(s)) {
+      throw badRequest('Chỉ chấp nhận ảnh tải lên, không nhận đường dẫn từ trang web khác.');
+    }
+    throw badRequest('Định dạng ảnh không hợp lệ. Hãy dùng ảnh PNG, JPEG hoặc WebP.');
+  }
+
+  const bytes = Math.floor((m[2].length * 3) / 4);
+  if (bytes > maxBytes) {
+    throw badRequest(`Ảnh tối đa ${Math.round(maxBytes / 1024 / 1024 * 10) / 10}MB.`);
+  }
+  return s;
+}

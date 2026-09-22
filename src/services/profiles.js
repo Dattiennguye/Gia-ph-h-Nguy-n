@@ -4,6 +4,8 @@ import { computeCompleteness } from '../domain/insights.js';
 import { ageFrom } from '../domain/matching.js';
 import { labelOf, ruleFields, isValid } from '../domain/taxonomy.js';
 import { badRequest, notFound } from '../lib/http.js';
+import { imageUrl } from '../lib/validate.js';
+import { storeImage, deleteImage } from '../lib/images.js';
 import { fuzzyDistanceKm, fuzzyDistanceLabel } from '../lib/geo.js';
 
 /* ------------------------------------------------------- đọc ra dạng dùng được */
@@ -305,12 +307,15 @@ export function updateLocation(userId, lat, lng) {
 /* ------------------------------------------------------------------- ảnh */
 
 export function addPhoto(userId, url) {
+  const validated = imageUrl(url, 'url');
   const count = get('SELECT COUNT(*) AS n FROM profile_photos WHERE user_id = ?', [userId]).n;
   if (count >= 9) throw badRequest('Mỗi hồ sơ tối đa 9 ảnh');
+  // Ảnh được ghi ra tệp; cơ sở dữ liệu chỉ giữ đường dẫn.
+  const safeUrl = storeImage(validated, { prefix: `u${userId}` });
   const id = insert(
     `INSERT INTO profile_photos (user_id, url, position, is_primary, status, created_at)
      VALUES (?, ?, ?, ?, 'approved', ?)`,
-    [userId, url, count, count === 0 ? 1 : 0, now()]
+    [userId, safeUrl, count, count === 0 ? 1 : 0, now()]
   );
   return get('SELECT * FROM profile_photos WHERE id = ?', [id]);
 }
@@ -319,6 +324,7 @@ export function deletePhoto(userId, photoId) {
   const photo = get('SELECT * FROM profile_photos WHERE id = ? AND user_id = ?', [photoId, userId]);
   if (!photo) throw notFound('Không tìm thấy ảnh');
   run('DELETE FROM profile_photos WHERE id = ?', [photoId]);
+  deleteImage(photo.url);
   if (photo.is_primary) {
     const next = get(
       'SELECT id FROM profile_photos WHERE user_id = ? ORDER BY position, id LIMIT 1',

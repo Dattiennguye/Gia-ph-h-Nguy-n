@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { wrap, badRequest } from '../lib/http.js';
 import * as v from '../lib/validate.js';
-import { requireAuth, requireVerified } from '../middleware/auth.js';
+import { requireAuth, requireVerified, attachUserFromQuery } from '../middleware/auth.js';
 import * as interactions from '../services/interactions.js';
 import * as chat from '../services/chat.js';
 import * as notifications from '../services/notifications.js';
@@ -11,6 +11,14 @@ import { limitByUser } from '../lib/rateLimit.js';
 import { SAFETY_TIPS } from '../domain/safety.js';
 
 export const socialRouter = Router();
+
+// EventSource không đặt được tiêu đề Authorization, nên riêng luồng sự kiện
+// chấp nhận token qua query — và chỉ đúng route đó.
+socialRouter.use((req, res, next) => {
+  if (req.path === '/stream') return attachUserFromQuery(req, res, next);
+  next();
+});
+
 socialRouter.use(requireAuth, requireVerified);
 
 /* ------------------------------------------------------------------ match */

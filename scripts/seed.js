@@ -19,6 +19,7 @@ import { sendMessage } from '../src/services/chat.js';
 import { createReport } from '../src/services/moderation.js';
 import { grantPremium } from '../src/services/billing.js';
 import { hashPassword } from '../src/lib/crypto.js';
+import { writeAvatar } from '../src/lib/images.js';
 
 const HO = ['Nguyễn', 'Trần', 'Lê', 'Phạm', 'Hoàng', 'Huỳnh', 'Phan', 'Vũ', 'Võ', 'Đặng', 'Bùi', 'Đỗ', 'Hồ', 'Ngô', 'Dương', 'Lý'];
 const DEM_NAM = ['Văn', 'Hữu', 'Đức', 'Quang', 'Minh', 'Thanh', 'Tuấn', 'Công', 'Bá', 'Xuân'];
@@ -61,19 +62,14 @@ const pickN = (arr, n) => {
 const chance = (p) => rnd() < p;
 const between = (a, b) => a + Math.floor(rnd() * (b - a + 1));
 
-/** Ảnh đại diện SVG sinh tại chỗ — không tải gì từ mạng, không dùng ảnh người thật. */
-function avatar(name, seed) {
-  const hue = Math.floor(seed * 360) % 360;
-  const initial = name.trim().split(/\s+/).pop()[0].toUpperCase();
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="500" viewBox="0 0 400 500">
-<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-<stop offset="0%" stop-color="hsl(${hue} 70% 62%)"/><stop offset="100%" stop-color="hsl(${(hue + 45) % 360} 68% 44%)"/>
-</linearGradient></defs>
-<rect width="400" height="500" fill="url(#g)"/>
-<circle cx="200" cy="200" r="86" fill="rgba(255,255,255,.22)"/>
-<text x="200" y="232" font-family="system-ui,sans-serif" font-size="96" font-weight="600" fill="#fff" text-anchor="middle">${initial}</text>
-</svg>`;
-  return `data:image/svg+xml;base64,${Buffer.from(svg, 'utf8').toString('base64')}`;
+/**
+ * Ảnh đại diện sinh tại chỗ dưới dạng PNG thật, ghi ra thư mục uploads.
+ *
+ * Dùng PNG chứ không phải SVG vì ứng dụng từ chối SVG do người dùng gửi lên —
+ * dữ liệu mẫu phải tuân đúng luật mà hệ thống áp cho người dùng thật.
+ */
+function avatar(name) {
+  return writeAvatar(name);
 }
 
 /* ------------------------------------------------------------ chọn khu vực */
@@ -205,7 +201,7 @@ const seedAll = transaction(() => {
     insert(
       `INSERT INTO profile_photos (user_id, url, position, is_primary, status, created_at)
        VALUES (?, ?, 0, 1, 'approved', ?)`,
-      [user.id, avatar(person.name, rnd()), now()]
+      [user.id, avatar(person.name), now()]
     );
 
     // Một số người đặt tiêu chí bắt buộc/ưu tiên.
@@ -369,7 +365,7 @@ if (!get('SELECT id FROM users WHERE email = ?', [DEMO_EMAIL])) {
   insert(
     `INSERT INTO profile_photos (user_id, url, position, is_primary, status, created_at)
      VALUES (?, ?, 0, 1, 'approved', ?)`,
-    [demo.id, avatar('Tiến Đạt', 0.61), now()]
+    [demo.id, avatar('Tiến Đạt'), now()]
   );
   console.log(`\n✓ Tài khoản demo: ${DEMO_EMAIL} / matkhau123`);
 }

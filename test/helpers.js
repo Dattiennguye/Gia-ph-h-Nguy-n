@@ -6,6 +6,7 @@ import os from 'node:os';
 export function useTempDb(name) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `vigo-${name}-`));
   process.env.DB_PATH = path.join(dir, 'test.db');
+  process.env.UPLOAD_DIR = path.join(dir, 'uploads');
   process.env.SESSION_SECRET = 'test-secret-0123456789abcdef';
   process.env.PII_ENCRYPTION_KEY = 'a'.repeat(64);
   process.env.EXPOSE_OTP = '1';

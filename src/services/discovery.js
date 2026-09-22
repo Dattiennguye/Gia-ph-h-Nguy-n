@@ -5,7 +5,7 @@ import { haversineKm, boundingBox, jitterPoint, fuzzyDistanceKm } from '../lib/g
 import { seededUnit } from '../lib/crypto.js';
 import { publicRegionLabel } from './regions.js';
 import { config } from '../config.js';
-import { badRequest } from '../lib/http.js';
+import { badRequest, notFound } from '../lib/http.js';
 import { isPremium } from './billing.js';
 
 /**
@@ -322,17 +322,40 @@ export function nearbyMap(userId, { radiusKm = 10 } = {}) {
   };
 }
 
-/** Xem chi tiết một hồ sơ kèm lời giải thích vì sao được đề xuất. */
-export function viewProfile(userId, targetId) {
-  const viewer = loadViewer(userId);
-  const target = loadProfile(targetId);
-  if (!target) throw badRequest('Không tìm thấy hồ sơ');
-
+/**
+ * Ai được xem hồ sơ của ai.
+ *
+ * Hồ sơ chỉ mở khi người đó đang hoạt động VÀ để chế độ công khai. Ngoại lệ
+ * duy nhất: hai người đã kết đôi — khi đó vẫn xem được nhau dù một bên đã ẩn
+ * hồ sơ, vì cuộc trò chuyện của họ vẫn đang mở.
+ *
+ * Mọi trường hợp từ chối đều trả về cùng một lỗi "không tìm thấy", để không
+ * xác nhận giúp kẻ dò rằng tài khoản đó có tồn tại hay không.
+ */
+function assertCanView(userId, targetId, target) {
   const blocked = get(
     `SELECT 1 AS x FROM blocks WHERE (user_id = ? AND blocked_id = ?) OR (user_id = ? AND blocked_id = ?)`,
     [userId, targetId, targetId, userId]
   );
-  if (blocked) throw badRequest('Không thể xem hồ sơ này');
+  if (blocked) throw notFound('Không tìm thấy hồ sơ này');
+
+  if (target.user_status === 'active' && target.visibility === 'public') return;
+
+  const [a, b] = userId < targetId ? [userId, targetId] : [targetId, userId];
+  const matched = get(
+    "SELECT 1 AS x FROM matches WHERE user_a = ? AND user_b = ? AND status = 'active'",
+    [a, b]
+  );
+  if (!matched) throw notFound('Không tìm thấy hồ sơ này');
+}
+
+/** Xem chi tiết một hồ sơ kèm lời giải thích vì sao được đề xuất. */
+export function viewProfile(userId, targetId) {
+  const viewer = loadViewer(userId);
+  const target = loadProfile(targetId);
+  if (!target) throw notFound('Không tìm thấy hồ sơ này');
+
+  assertCanView(userId, targetId, target);
 
   const distanceKm = haversineKm(
     viewer.profile.lat, viewer.profile.lng, target.lat, target.lng

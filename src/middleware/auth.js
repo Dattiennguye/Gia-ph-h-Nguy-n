@@ -1,10 +1,31 @@
 import { resolveSession, touchActivity, assertUsable } from '../services/auth.js';
 import { unauthorized, forbidden } from '../lib/http.js';
 
+/**
+ * Lối vào dành riêng cho EventSource, thứ duy nhất trong trình duyệt không cho
+ * đặt tiêu đề Authorization. Chỉ gắn vào đúng route luồng sự kiện.
+ */
+export function attachUserFromQuery(req, res, next) {
+  if (!req.user && req.query?.token) {
+    const user = resolveSession(String(req.query.token));
+    if (user) {
+      req.user = user;
+      req.token = String(req.query.token);
+    }
+  }
+  next();
+}
+
+/**
+ * Token LUÔN đọc từ tiêu đề Authorization.
+ *
+ * Không chấp nhận `?token=` ở đây: token nằm trong URL sẽ lọt vào log máy chủ,
+ * lịch sử trình duyệt và tiêu đề Referer. Riêng kênh SSE không đặt được tiêu đề
+ * nên có lối đi riêng, giới hạn đúng một endpoint (xem routes/social.js).
+ */
 function tokenFrom(req) {
   const header = req.get('authorization');
   if (header?.startsWith('Bearer ')) return header.slice(7).trim();
-  if (req.query?.token) return String(req.query.token);
   return null;
 }
 

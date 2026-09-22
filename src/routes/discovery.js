@@ -12,6 +12,7 @@ discoveryRouter.use(requireAuth, requireVerified);
 /** Bảng khám phá — danh sách thẻ đã xếp theo độ phù hợp. */
 discoveryRouter.get(
   '/feed',
+  limitByUser('feed', 240, 60 * 60 * 1000),
   wrap((req, res) => {
     res.json(
       discovery.discoverFeed(req.user.id, {
@@ -38,8 +39,10 @@ discoveryRouter.get(
 );
 
 /** Chi tiết một hồ sơ + vì sao chúng tôi đề xuất người này. */
+// Giới hạn để một tài khoản không thể dò tuần tự theo id mà cào sạch kho hồ sơ.
 discoveryRouter.get(
   '/profile/:id',
+  limitByUser('profile-view', 300, 60 * 60 * 1000),
   wrap((req, res) => {
     const targetId = Number(req.params.id);
     if (!Number.isInteger(targetId)) throw badRequest('Mã người dùng không hợp lệ');

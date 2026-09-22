@@ -1,6 +1,8 @@
 import { all, get, insert, run, now, transaction } from '../db/index.js';
 import { encryptPII, sha256 } from '../lib/crypto.js';
 import { badRequest, conflict, notFound } from '../lib/http.js';
+import { imageUrl } from '../lib/validate.js';
+import { storeImage } from '../lib/images.js';
 import { audit } from './audit.js';
 import { notify } from './notifications.js';
 
@@ -46,14 +48,14 @@ export function requestPhotoChallenge(userId) {
 
 /** Nộp ảnh selfie theo tư thế đã yêu cầu. Người kiểm duyệt sẽ đối chiếu. */
 export function submitPhoto(userId, photoUrl) {
-  if (!photoUrl) throw badRequest('Thiếu ảnh xác minh');
+  const safeUrl = storeImage(imageUrl(photoUrl, 'photo_url'), { prefix: `verify${userId}` });
   const row = get("SELECT * FROM verifications WHERE user_id = ? AND type = 'photo'", [userId]);
   if (!row) throw badRequest('Hãy yêu cầu tư thế xác minh trước');
   if (row.status === 'approved') throw conflict('Bạn đã xác minh khuôn mặt rồi');
 
   run(
     `UPDATE verifications SET payload_enc = ?, status = 'pending', created_at = ? WHERE id = ?`,
-    [encryptPII(JSON.stringify({ photo_url: photoUrl, submitted_at: now() })), now(), row.id]
+    [encryptPII(JSON.stringify({ photo_url: safeUrl, submitted_at: now() })), now(), row.id]
   );
   audit({ actorId: userId, action: 'verification.submit', targetType: 'verification', targetId: row.id, detail: { type: 'photo' } });
   return { status: 'pending', message: 'Đã gửi. Chúng tôi sẽ xác minh trong vòng 24 giờ.' };
