@@ -28,7 +28,7 @@ phải biên dịch gì.
 động lại; tài khoản quản trị sẽ được tạo tự động, truy cập tại `/admin.html`.
 
 ```bash
-npm test      # 94 bài kiểm thử
+npm test      # 136 bài kiểm thử
 npm run reset # xoá sạch dữ liệu
 ```
 
@@ -217,6 +217,8 @@ src/
   services/             nghiệp vụ, chạm DB
   routes/               tầng HTTP: kiểm tra đầu vào, gọi service
   lib/                  crypto · geo · validate · rateLimit · events(SSE) · ai · images
+                        sms (Twilio/eSMS/webhook) · jwt · oauth (Google/Apple)
+  lib/payments/         vnpay · momo
   middleware/auth.js    phiên, xác minh SĐT, phân quyền
 
 public/                 giao diện, không build
@@ -225,7 +227,7 @@ uploads/                ảnh người dùng (ngoài git, gắn volume khi chạ
 Dockerfile              image production, chạy bằng user không phải root
 docker-compose.yml      bắt buộc khai báo khoá bí mật, kèm volume dữ liệu
 scripts/seed.js         sinh dữ liệu mẫu
-test/                   94 bài kiểm thử
+test/                   136 bài kiểm thử
 ```
 
 ---
@@ -348,7 +350,7 @@ kiểm thử để không tái diễn (`test/security.test.js`):
 ## Kiểm thử
 
 ```
-npm test    # 94 bài, ~2 giây
+npm test    # 136 bài, ~3 giây
 ```
 
 | Tệp | Nội dung |
@@ -361,6 +363,9 @@ npm test    # 94 bài, ~2 giây
 | `preference.test.js` | tác động của tiêu chí, thử nghiệm thay đổi, gói dịch vụ, xác minh |
 | `ratelimit.test.js` | chống thử mật khẩu và spam OTP |
 | `security.test.js` | quyền xem hồ sơ, token trong URL, ảnh độc hại, tiêu đề bảo mật, rò rỉ cho quản trị viên |
+| `sms.test.js` | Twilio, eSMS, webhook — đúng endpoint, đúng định dạng, thử lại, nhật ký không chứa mã OTP |
+| `oauth.test.js` | xác thực JWT: sai `aud`, alg confusion, alg "none", chữ ký giả, token hết hạn |
+| `payments.test.js` | VNPay & MoMo: chữ ký giả, sửa số tiền, IPN lặp, huỷ giao dịch |
 
 Mỗi tệp dùng một cơ sở dữ liệu riêng và gọi qua HTTP như một client thật.
 
@@ -378,21 +383,71 @@ Mỗi tệp dùng một cơ sở dữ liệu riêng và gọi qua HTTP như mộ
 
 ## Ghi chú khi triển khai thật
 
-Các điểm cần thay trước khi mở cho người dùng thật:
+### SMS — đã có sẵn nhà cung cấp
 
-1. **SMS** — đặt `SMS_PROVIDER=http` và trỏ `SMS_WEBHOOK_URL` tới nhà cung cấp
-   (Twilio, eSMS, Viettel...). Mặc định `console` chỉ in ra terminal.
-2. **OAuth** — `POST /auth/oauth` đã kiểm tra token Google qua endpoint chính
-   thức; phần Apple cần bổ sung kiểm tra khoá công khai.
-3. **Ảnh** — hiện lưu dưới dạng data URI trong DB, đủ dùng để chạy thử. Khi có
-   người dùng thật nên chuyển sang lưu trữ đối tượng (S3/R2) kèm quét nội dung.
-4. **Thanh toán** — `PAYMENT_PROVIDER=mock` tự xác nhận. Dùng `manual` để đối
-   soát chuyển khoản tay, hoặc nối VNPay/MoMo qua cùng một chỗ trong
-   `services/billing.js`.
-5. **Cơ sở dữ liệu** — SQLite chạy tốt tới hàng chục nghìn người dùng trên một
+| `SMS_PROVIDER` | Dùng khi |
+| --- | --- |
+| `console` | phát triển — mã in ra terminal |
+| `twilio` | quốc tế — cần `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` |
+| `esms` | Việt Nam — cần `ESMS_API_KEY`, `ESMS_SECRET_KEY`, brandname đã được duyệt |
+| `http` | nhà cung cấp khác — nhận POST `{ to, text, purpose }` |
+
+Mọi lần gửi được ghi vào bảng `sms_messages` để trả lời câu hỏi "đã gửi chưa".
+**Nội dung tin không được lưu** — nội dung chứa mã OTP, và một bảng log chứa mã
+OTP chính là một cửa hậu vào mọi tài khoản.
+
+### Đăng nhập Google / Apple
+
+Đặt `GOOGLE_CLIENT_ID` và/hoặc `APPLE_CLIENT_ID` (nhiều id cách nhau bởi dấu
+phẩy — web, iOS và Android thường mỗi nền tảng một id). Client gửi
+`identity_token` lên `POST /api/auth/oauth`.
+
+Máy chủ tự kiểm tra chữ ký bằng khoá công khai của nhà cung cấp, và **bắt buộc
+khớp `aud`**. Không có bước đó thì một token hợp lệ do bất kỳ ứng dụng nào khác
+cấp cũng đăng nhập được vào đây — đó là lỗ hổng chiếm tài khoản, không phải chi
+tiết nhỏ.
+
+Thuật toán ký được **suy ra từ khoá trong JWKS**, không lấy từ tiêu đề token:
+tin theo tiêu đề thì kẻ tấn công chỉ cần đổi `alg` thành `none`, hoặc đổi RS256
+thành HS256 rồi ký bằng chính khoá công khai.
+
+CSP tự nới cho đúng tên miền SDK của nhà cung cấp **đang bật** — không cấu hình
+thì không nới.
+
+Phần còn lại là ở client: nhúng SDK của Google/Apple để lấy `identity_token`.
+Máy chủ đã sẵn sàng nhận.
+
+### Thanh toán
+
+| `PAYMENT_PROVIDER` | Hành vi |
+| --- | --- |
+| `mock` | tự xác nhận ngay — chỉ dùng để chạy thử |
+| `manual` | sinh mã chuyển khoản, admin đối soát tay |
+| `vnpay` | chuyển sang cổng VNPay, nhận kết quả qua IPN |
+| `momo` | tạo giao dịch ví MoMo, nhận kết quả qua IPN |
+
+Ba nguyên tắc được áp dụng cho cả hai cổng:
+
+1. **Chỉ IPN mới cộng quyền lợi.** Trang người dùng quay về chỉ để hiển thị —
+   người dùng sửa được tham số trên thanh địa chỉ.
+2. **Số tiền phải khớp đơn hàng.** Thiếu bước này thì trả 1.000đ mở được gói
+   699.000đ. Lệch tiền được ghi vào nhật ký kiểm toán.
+3. **IPN lặp không cộng hai lần.** Cổng thanh toán có gửi lại.
+
+> ⚠️ Tôi không kiểm chứng được với sandbox thật (môi trường build chặn truy cập
+> ra ngoài). Chữ ký, thứ tự tham số và luồng IPN đã được kiểm thử đầy đủ bằng
+> cổng giả lập, nhưng **hãy chạy một giao dịch sandbox thật trước khi mở bán**.
+> Nếu VNPay báo sai chữ ký, thử đổi `VNPAY_HASH_ENCODE=0` — cách mã hoá chuỗi ký
+> là điểm khác biệt giữa các bản tài liệu của VNPay.
+
+### Còn lại
+
+1. **Ảnh** — đang lưu trên đĩa máy chủ. Chạy nhiều máy thì trỏ `UPLOAD_DIR` vào
+   ổ đĩa dùng chung, hoặc thay thân hàm `storeImage` để đẩy lên S3/R2.
+2. **Cơ sở dữ liệu** — SQLite chạy tốt tới hàng chục nghìn người dùng trên một
    máy. Lược đồ viết theo chuẩn SQL nên chuyển sang PostgreSQL không cần đổi
    thiết kế.
-6. **Mở khu vực** — đừng mở toàn quốc ngay. Dùng bảng mật độ trong trang quản trị,
+3. **Mở khu vực** — đừng mở toàn quốc ngay. Dùng bảng mật độ trong trang quản trị,
    mở từng tỉnh khi tỷ lệ giới tính đủ cân.
 
 ---

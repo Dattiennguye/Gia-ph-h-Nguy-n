@@ -46,9 +46,28 @@ export const config = {
   ),
 
   sms: {
+    // console | twilio | esms | http
     provider: process.env.SMS_PROVIDER || 'console',
+    senderName: process.env.SMS_SENDER_NAME || 'Vigo Match',
+
     webhookUrl: process.env.SMS_WEBHOOK_URL || '',
     webhookToken: process.env.SMS_WEBHOOK_TOKEN || '',
+
+    twilio: {
+      accountSid: process.env.TWILIO_ACCOUNT_SID || '',
+      authToken: process.env.TWILIO_AUTH_TOKEN || '',
+      from: process.env.TWILIO_FROM || '',
+      baseUrl: process.env.TWILIO_BASE_URL || 'https://api.twilio.com',
+    },
+
+    esms: {
+      apiKey: process.env.ESMS_API_KEY || '',
+      secretKey: process.env.ESMS_SECRET_KEY || '',
+      brandname: process.env.ESMS_BRANDNAME || '',
+      // 2 = tin CSKH qua brandname, 8 = tin cố định. Xem tài liệu eSMS.
+      smsType: process.env.ESMS_SMS_TYPE || '2',
+      baseUrl: process.env.ESMS_BASE_URL || 'https://rest.esms.vn',
+    },
   },
   otp: {
     ttlMs: num(process.env.OTP_TTL_SECONDS, 300) * 1000,
@@ -70,6 +89,15 @@ export const config = {
     freeDailyLikes: num(process.env.FREE_DAILY_LIKES, 40),
   },
 
+  oauth: {
+    // Nhiều client id cách nhau bởi dấu phẩy: web, iOS và Android thường mỗi
+    // nền tảng một id, và token của cả ba đều phải được chấp nhận.
+    googleClientIds: (process.env.GOOGLE_CLIENT_ID || '')
+      .split(',').map((s) => s.trim()).filter(Boolean),
+    appleClientIds: (process.env.APPLE_CLIENT_ID || '')
+      .split(',').map((s) => s.trim()).filter(Boolean),
+  },
+
   ai: {
     apiKey: process.env.ANTHROPIC_API_KEY || '',
     model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5',
@@ -79,8 +107,28 @@ export const config = {
   },
 
   payment: {
+    // mock | manual | vnpay | momo
     provider: process.env.PAYMENT_PROVIDER || 'mock',
     bankAccount: process.env.PAYMENT_BANK_ACCOUNT || '',
+    // Địa chỉ công khai của máy chủ, để dựng returnUrl và ipnUrl.
+    publicUrl: (process.env.PUBLIC_URL || 'http://localhost:3000').replace(/\/$/, ''),
+
+    vnpay: {
+      tmnCode: process.env.VNPAY_TMN_CODE || '',
+      hashSecret: process.env.VNPAY_HASH_SECRET || '',
+      payUrl: process.env.VNPAY_PAY_URL || 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
+      // Bản 2.1.0 mã hoá giá trị trong chuỗi ký; một số bản demo cũ thì không.
+      // Nếu VNPay báo sai chữ ký, thử đổi cờ này.
+      encodeHash: (process.env.VNPAY_HASH_ENCODE ?? '1') !== '0',
+    },
+
+    momo: {
+      partnerCode: process.env.MOMO_PARTNER_CODE || '',
+      accessKey: process.env.MOMO_ACCESS_KEY || '',
+      secretKey: process.env.MOMO_SECRET_KEY || '',
+      endpoint: process.env.MOMO_ENDPOINT || 'https://test-payment.momo.vn',
+      requestType: process.env.MOMO_REQUEST_TYPE || 'captureWallet',
+    },
   },
 
   admin: {

@@ -41,7 +41,9 @@ const routes = [
 let badges = { chat: 0, me: 0 };
 
 async function route() {
-  const path = location.hash.slice(1) || '/';
+  // Cổng thanh toán quay về kèm ?status=... — bỏ phần truy vấn khi so khớp route.
+  const raw = location.hash.slice(1) || '/';
+  const path = raw.split('?')[0];
   const match = routes.find(([re]) => re.test(path));
 
   if (!match) {

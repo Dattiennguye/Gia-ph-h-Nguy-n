@@ -6,6 +6,7 @@ import * as regions from '../services/regions.js';
 import { PRODUCTS, PREMIUM_BENEFITS } from '../services/billing.js';
 import { SAFETY_TIPS } from '../domain/safety.js';
 import { config } from '../config.js';
+import { configuredProviders } from '../lib/oauth.js';
 
 export const metaRouter = Router();
 
@@ -26,6 +27,7 @@ metaRouter.get(
       products: PRODUCTS,
       premium_benefits: PREMIUM_BENEFITS,
       safety_tips: SAFETY_TIPS,
+      auth_providers: configuredProviders(),
     })
   )
 );

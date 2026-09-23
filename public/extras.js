@@ -293,12 +293,33 @@ function simulator() {
 /* ================================================================ PREMIUM === */
 
 export async function premiumScreen() {
+  // Khi quay về từ cổng thanh toán, địa chỉ mang theo kết quả để hiển thị.
+  // Đây CHỈ là thông báo — quyền lợi do IPN máy-tới-máy quyết định, nên màn
+  // hình luôn đọc lại trạng thái thật từ máy chủ.
+  const hash = location.hash;
+  const qIndex = hash.indexOf('?');
+  if (qIndex !== -1) {
+    const params = new URLSearchParams(hash.slice(qIndex + 1));
+    const status = params.get('status');
+    if (status === 'success') toast('Thanh toán thành công. Quyền lợi đang được kích hoạt.');
+    else if (status) toast(params.get('message') || 'Giao dịch không thành công.', true);
+    history.replaceState(null, '', '#/premium');
+  }
+
   mount(topBar('Vigo Premium', { onBack: () => go('#/me') }), el('div.screen.no-nav', {}, [spinner()]));
   const plans = await api('/billing/plans');
 
   const buy = async (productId, name) => {
     confirmSheet('Xác nhận', `Bạn sắp mua "${name}".`, 'Tiếp tục', async () => {
       const res = await api('/billing/checkout', { method: 'POST', body: { product: productId } });
+
+      // VNPay / MoMo: chuyển người dùng sang cổng thanh toán.
+      if (res.pay_url) {
+        toast('Đang chuyển tới cổng thanh toán...');
+        location.href = res.pay_url;
+        return;
+      }
+
       if (res.status === 'paid') {
         toast('Thanh toán thành công. Quyền lợi đã được kích hoạt.');
         premiumScreen();

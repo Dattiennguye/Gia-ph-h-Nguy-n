@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { wrap, badRequest, unauthorized } from '../lib/http.js';
+import { wrap, badRequest, unauthorized, ApiError } from '../lib/http.js';
+import { verifyIdentityToken, isConfigured, configuredProviders } from '../lib/oauth.js';
 import * as v from '../lib/validate.js';
 import * as auth from '../services/auth.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -106,17 +107,34 @@ authRouter.post(
   })
 );
 
+/**
+ * Xác thực token của nhà cung cấp.
+ *
+ * Chữ ký được kiểm tra tại chỗ bằng khoá công khai của nhà cung cấp, và quan
+ * trọng nhất là kiểm tra `aud` — token phải được cấp CHO ỨNG DỤNG NÀY. Không
+ * có bước đó thì một token hợp lệ do bất kỳ ứng dụng nào khác cấp cũng đăng
+ * nhập được vào đây.
+ */
 async function verifyOAuthToken(provider, body) {
-  if (provider === 'google' && body.identity_token) {
-    // Google cung cấp endpoint kiểm tra token công khai.
-    const r = await fetch(
-      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(body.identity_token)}`
-    );
-    if (!r.ok) throw unauthorized('Token Google không hợp lệ');
-    const info = await r.json();
-    if (!info.email_verified) throw unauthorized('Email Google chưa được xác minh');
-    return { subject: info.sub, email: info.email, name: info.name };
+  if (body.identity_token) {
+    try {
+      const claims = await verifyIdentityToken(provider, body.identity_token);
+      if (claims.email && !claims.emailVerified) {
+        throw unauthorized(`Email ${provider === 'apple' ? 'Apple' : 'Google'} chưa được xác minh`);
+      }
+      return {
+        subject: claims.subject,
+        email: claims.email,
+        // Apple chỉ gửi tên ở lần đăng nhập đầu tiên và gửi NGOÀI token, nên
+        // client phải chuyển kèm; không có thì để trống rồi hỏi sau.
+        name: claims.name ?? body.full_name ?? null,
+      };
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw unauthorized(err.message);
+    }
   }
+
   if (!config.isProd && body.dev_subject) {
     // Lối vào dành riêng cho phát triển/kiểm thử. Bị chặn ở môi trường thật.
     return {
@@ -125,8 +143,11 @@ async function verifyOAuthToken(provider, body) {
       name: body.dev_name ?? null,
     };
   }
+
   throw badRequest(
-    `Chưa cấu hình xác thực ${provider}. Cung cấp identity_token hợp lệ, hoặc dùng đăng nhập bằng email/số điện thoại.`
+    isConfigured(provider)
+      ? 'Thiếu identity_token'
+      : `Chưa cấu hình đăng nhập ${provider === 'apple' ? 'Apple' : 'Google'} trên máy chủ này.`
   );
 }
 

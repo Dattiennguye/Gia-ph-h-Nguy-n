@@ -4,6 +4,10 @@ import { badRequest, conflict, notFound } from '../lib/http.js';
 import { randomToken } from '../lib/crypto.js';
 import { audit } from './audit.js';
 import { notify } from './notifications.js';
+import * as vnpay from '../lib/payments/vnpay.js';
+import * as momo from '../lib/payments/momo.js';
+
+export { vnpay, momo };
 
 /**
  * GÓI DỊCH VỤ
@@ -100,22 +104,68 @@ export function entitlements(userId) {
  * Tạo giao dịch. Với provider `mock`, giao dịch được xác nhận ngay (dùng để
  * demo và kiểm thử). Với `manual`, giao dịch chờ admin đối soát chuyển khoản.
  */
-export const createPayment = transaction((userId, productId) => {
-  const product = PRODUCTS[productId];
-  if (!product) throw badRequest('Sản phẩm không tồn tại');
-
+/** Tạo bản ghi giao dịch ở trạng thái chờ. */
+const openPayment = transaction((userId, product) => {
   const ref = `VIGO${randomToken(6).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8)}`;
   const paymentId = insert(
     `INSERT INTO payments (user_id, product, amount_vnd, provider, provider_ref, status, created_at)
      VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
     [userId, product.id, product.amount_vnd, config.payment.provider, ref, now()]
   );
+  return { paymentId, ref };
+});
 
-  if (config.payment.provider === 'mock') {
+/**
+ * Bắt đầu một giao dịch.
+ *
+ * Tuỳ nhà cung cấp mà trả về thứ khác nhau:
+ *   mock   → xác nhận ngay (chỉ dùng để chạy thử và kiểm thử)
+ *   manual → thông tin chuyển khoản để admin đối soát
+ *   vnpay  → địa chỉ để chuyển người dùng sang cổng VNPay
+ *   momo   → địa chỉ / deeplink của ví MoMo
+ */
+export async function createPayment(userId, productId, { ipAddr } = {}) {
+  const product = PRODUCTS[productId];
+  if (!product) throw badRequest('Sản phẩm không tồn tại');
+
+  const provider = config.payment.provider;
+  const { paymentId, ref } = openPayment(userId, product);
+  const base = config.payment.publicUrl;
+  const orderInfo = `Vigo Match - ${product.name}`;
+
+  if (provider === 'mock') {
     confirmPayment(ref, { auto: true });
     return { ...getPayment(paymentId), instructions: null };
   }
 
+  if (provider === 'vnpay') {
+    const payUrl = vnpay.buildPaymentUrl({
+      txnRef: ref,
+      amountVnd: product.amount_vnd,
+      orderInfo,
+      ipAddr,
+      returnUrl: `${base}/api/billing/vnpay/return`,
+    });
+    return { ...getPayment(paymentId), pay_url: payUrl };
+  }
+
+  if (provider === 'momo') {
+    try {
+      const res = await momo.createPayment({
+        orderId: ref,
+        amountVnd: product.amount_vnd,
+        orderInfo,
+        redirectUrl: `${base}/#/premium`,
+        ipnUrl: `${base}/api/billing/momo/ipn`,
+      });
+      return { ...getPayment(paymentId), pay_url: res.payUrl, deeplink: res.deeplink };
+    } catch (err) {
+      run("UPDATE payments SET status = 'failed' WHERE id = ?", [paymentId]);
+      throw badRequest(`Không tạo được giao dịch MoMo: ${err.message}`);
+    }
+  }
+
+  // manual
   return {
     ...getPayment(paymentId),
     instructions: {
@@ -125,7 +175,47 @@ export const createPayment = transaction((userId, productId) => {
       note: `Chuyển khoản đúng nội dung "${ref}" để hệ thống đối soát tự động.`,
     },
   };
-});
+}
+
+/**
+ * Ghi nhận kết quả từ cổng thanh toán.
+ *
+ * Hai điều kiện bắt buộc trước khi cộng quyền lợi:
+ *   1. Chữ ký hợp lệ (đã kiểm tra ở tầng gọi).
+ *   2. SỐ TIỀN KHỚP với đơn hàng đã tạo. Không kiểm tra bước này thì kẻ tấn
+ *      công có thể trả 1.000đ cho gói 699.000đ.
+ *
+ * Hàm chạy được nhiều lần với cùng một giao dịch mà không cộng quyền lợi hai
+ * lần — cổng thanh toán có thể gửi IPN lặp lại.
+ */
+export function settlePayment({ ref, amountVnd, success, reason }) {
+  const payment = get('SELECT * FROM payments WHERE provider_ref = ?', [ref]);
+  if (!payment) return { ok: false, code: 'not_found', message: 'Không tìm thấy giao dịch' };
+
+  if (payment.status === 'paid') {
+    return { ok: true, code: 'already_confirmed', payment, message: 'Giao dịch đã được xác nhận trước đó' };
+  }
+
+  if (amountVnd != null && Math.round(amountVnd) !== payment.amount_vnd) {
+    run("UPDATE payments SET status = 'failed' WHERE id = ?", [payment.id]);
+    audit({
+      actorId: payment.user_id,
+      action: 'billing.amount_mismatch',
+      targetType: 'payment',
+      targetId: payment.id,
+      detail: { expected: payment.amount_vnd, received: amountVnd },
+    });
+    return { ok: false, code: 'amount_mismatch', message: 'Số tiền không khớp với đơn hàng' };
+  }
+
+  if (!success) {
+    run("UPDATE payments SET status = 'failed' WHERE id = ?", [payment.id]);
+    return { ok: false, code: 'failed', message: reason ?? 'Giao dịch không thành công' };
+  }
+
+  confirmPayment(ref, { auto: true });
+  return { ok: true, code: 'confirmed', payment: getPayment(payment.id) };
+}
 
 export function getPayment(id) {
   return get('SELECT * FROM payments WHERE id = ?', [id]);

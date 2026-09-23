@@ -9,6 +9,7 @@ import {
 import { config } from '../config.js';
 import { badRequest, conflict, forbidden, unauthorized, tooMany } from '../lib/http.js';
 import { consume } from '../lib/rateLimit.js';
+import { sendSms } from '../lib/sms.js';
 import { audit } from './audit.js';
 
 /* --------------------------------------------------------------- người dùng */
@@ -135,24 +136,14 @@ export function issueOtp({ channel, destination, purpose }) {
 }
 
 function deliverOtp({ channel, destination, code, purpose }) {
-  const text = `Mã xác minh Vigo Match của bạn là ${code}. Mã có hiệu lực trong ${Math.round(
-    config.otp.ttlMs / 60000
-  )} phút. Không chia sẻ mã này với bất kỳ ai.`;
+  const minutes = Math.round(config.otp.ttlMs / 60000);
+  const text = `${config.sms.senderName}: Ma xac minh cua ban la ${code}, co hieu luc ${minutes} phut. Khong chia se ma nay voi bat ky ai.`;
 
-  if (config.sms.provider === 'http' && config.sms.webhookUrl) {
-    fetch(config.sms.webhookUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(config.sms.webhookToken
-          ? { Authorization: `Bearer ${config.sms.webhookToken}` }
-          : {}),
-      },
-      body: JSON.stringify({ channel, to: destination, text, purpose }),
-    }).catch((err) => console.error('[otp] gửi thất bại:', err.message));
-    return;
-  }
-  console.log(`\n  [OTP] ${channel} → ${destination} (${purpose}): ${code}\n`);
+  // Không chặn phản hồi HTTP để chờ nhà cung cấp SMS. Người dùng nhận được
+  // màn hình nhập mã ngay; nếu gửi hỏng thì đã có nhật ký và nút "gửi lại".
+  sendSms({ to: destination, text, purpose }).catch((err) =>
+    console.error('[otp] lỗi không mong đợi khi gửi:', err)
+  );
 }
 
 /** Đối chiếu mã. Ném lỗi nếu sai/hết hạn/quá số lần thử. */

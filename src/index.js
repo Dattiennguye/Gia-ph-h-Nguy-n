@@ -69,12 +69,30 @@ export function createApp() {
   // dữ liệu đi đâu khác ngoài chính máy chủ này. Ảnh cho phép data: vì ảnh đại
   // diện được nhúng trực tiếp, nhưng KHÔNG cho phép ảnh từ tên miền lạ — tránh
   // việc một người đặt ảnh trỏ sang máy chủ của họ để ghi lại IP người xem.
+  //
+  // SDK đăng nhập của Google/Apple là script tải từ tên miền của họ. CSP chỉ
+  // mở cho đúng nhà cung cấp ĐANG được bật — không cấu hình thì không nới, để
+  // bề mặt tấn công không rộng ra vì một tính năng không dùng đến.
+  const scriptSrc = ["'self'"];
+  const frameSrc = ["'self'"];
+  const connectSrc = ["'self'"];
+  if (config.oauth.googleClientIds.length) {
+    scriptSrc.push('https://accounts.google.com');
+    frameSrc.push('https://accounts.google.com');
+    connectSrc.push('https://accounts.google.com');
+  }
+  if (config.oauth.appleClientIds.length) {
+    scriptSrc.push('https://appleid.cdn-apple.com');
+    frameSrc.push('https://appleid.apple.com');
+  }
+
   const CSP = [
     "default-src 'self'",
-    "script-src 'self'",
+    `script-src ${scriptSrc.join(' ')}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
-    "connect-src 'self'",
+    `connect-src ${connectSrc.join(' ')}`,
+    `frame-src ${frameSrc.join(' ')}`,
     "font-src 'self'",
     "object-src 'none'",
     "base-uri 'none'",

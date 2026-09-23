@@ -380,6 +380,22 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_actor   ON audit_logs(actor_id);
 
+-- Nhật ký gửi SMS. Cố ý KHÔNG lưu nội dung tin: nội dung chứa mã OTP, và một
+-- bảng log chứa mã OTP chính là một cửa hậu vào mọi tài khoản.
+CREATE TABLE IF NOT EXISTS sms_messages (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  provider     TEXT    NOT NULL,
+  destination  TEXT    NOT NULL,
+  purpose      TEXT    NOT NULL,
+  status       TEXT    NOT NULL CHECK (status IN ('pending','sent','failed')),
+  provider_ref TEXT,
+  error        TEXT,
+  created_at   INTEGER NOT NULL,
+  sent_at      INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_sms_dest ON sms_messages(destination, created_at);
+CREATE INDEX IF NOT EXISTS idx_sms_status ON sms_messages(status);
+
 CREATE TABLE IF NOT EXISTS rate_limits (
   bucket      TEXT    NOT NULL,
   window_start INTEGER NOT NULL,
