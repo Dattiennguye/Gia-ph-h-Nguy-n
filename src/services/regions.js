@@ -49,6 +49,7 @@ export const seedRegions = transaction(() => {
   };
 
   walk(vietnam, 'country', null, null);
+  labelCache.clear();
   return count;
 });
 
@@ -78,15 +79,35 @@ export function regionPath(id) {
  * Khu vực hiển thị công khai cho người khác: luôn lùi lên cấp quận/huyện nếu
  * người dùng chọn tới cấp xã/phường — đủ để biết "cùng khu vực", không đủ để
  * tìm ra nhà.
+ *
+ * Kết quả được nhớ lại. Địa giới hành chính không đổi trong lúc chạy, mà hàm
+ * này bị gọi cho từng người trong danh sách — trước khi nhớ, một lần mở bản đồ
+ * tốn hàng trăm truy vấn chỉ để tra đi tra lại cùng mấy cái tên.
  */
+const labelCache = new Map();
+
 export function publicRegionLabel(id) {
+  if (id == null) return null;
+  if (labelCache.has(id)) return labelCache.get(id);
+
   const path = regionPath(id);
-  if (!path.length) return null;
-  const district = path.find((r) => r.level === 'district');
-  const province = path.find((r) => r.level === 'province');
-  if (district && province) return `${district.name}, ${province.name}`;
-  if (province) return province.name;
-  return path[path.length - 1].name;
+  let label = null;
+  if (path.length) {
+    const district = path.find((r) => r.level === 'district');
+    const province = path.find((r) => r.level === 'province');
+    label = district && province
+      ? `${district.name}, ${province.name}`
+      : province
+        ? province.name
+        : path[path.length - 1].name;
+  }
+  labelCache.set(id, label);
+  return label;
+}
+
+/** Xoá bộ nhớ đệm — gọi sau khi nạp lại cây địa giới. */
+export function clearRegionCache() {
+  labelCache.clear();
 }
 
 /** Tìm kiếm theo tên, không phân biệt dấu. */

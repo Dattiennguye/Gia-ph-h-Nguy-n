@@ -28,8 +28,9 @@ phải biên dịch gì.
 động lại; tài khoản quản trị sẽ được tạo tự động, truy cập tại `/admin.html`.
 
 ```bash
-npm test      # 136 bài kiểm thử
+npm test      # 142 bài kiểm thử
 npm run reset # xoá sạch dữ liệu
+npm run bench -- 50000   # đo hiệu năng với 50.000 hồ sơ
 ```
 
 ---
@@ -227,7 +228,8 @@ uploads/                ảnh người dùng (ngoài git, gắn volume khi chạ
 Dockerfile              image production, chạy bằng user không phải root
 docker-compose.yml      bắt buộc khai báo khoá bí mật, kèm volume dữ liệu
 scripts/seed.js         sinh dữ liệu mẫu
-test/                   136 bài kiểm thử
+scripts/bench.js        đo hiệu năng ở quy mô lớn
+test/                   142 bài kiểm thử
 ```
 
 ---
@@ -350,7 +352,7 @@ kiểm thử để không tái diễn (`test/security.test.js`):
 ## Kiểm thử
 
 ```
-npm test    # 136 bài, ~3 giây
+npm test    # 142 bài, ~4 giây
 ```
 
 | Tệp | Nội dung |
@@ -366,6 +368,7 @@ npm test    # 136 bài, ~3 giây
 | `sms.test.js` | Twilio, eSMS, webhook — đúng endpoint, đúng định dạng, thử lại, nhật ký không chứa mã OTP |
 | `oauth.test.js` | xác thực JWT: sai `aud`, alg confusion, alg "none", chữ ký giả, token hết hạn |
 | `payments.test.js` | VNPay & MoMo: chữ ký giả, sửa số tiền, IPN lặp, huỷ giao dịch |
+| `scale.test.js` | ai được nhìn thấy, thứ tự theo khoảng cách, số truy vấn không tăng theo kho |
 
 Mỗi tệp dùng một cơ sở dữ liệu riêng và gọi qua HTTP như một client thật.
 
@@ -449,6 +452,53 @@ Ba nguyên tắc được áp dụng cho cả hai cổng:
    thiết kế.
 3. **Mở khu vực** — đừng mở toàn quốc ngay. Dùng bảng mật độ trong trang quản trị,
    mở từng tỉnh khi tỷ lệ giới tính đủ cân.
+
+---
+
+## Quy mô
+
+Đo bằng `npm run bench` — nạp hồ sơ tổng hợp vào một cơ sở dữ liệu riêng rồi đo
+từng màn hình. Con số dưới đây là **50.000 hồ sơ dồn hết vào Hà Nội**, tức là
+trường hợp nặng nhất: ai cũng nằm trong bán kính tìm kiếm của mọi người.
+
+| Màn hình | Trung vị | p95 | Truy vấn |
+| --- | --- | --- | --- |
+| Bảng khám phá | 129 ms | 172 ms | 53 |
+| Hôm nay dành cho bạn | 94 ms | 130 ms | 72 |
+| Bản đồ quanh bạn | 84 ms | 95 ms | 15 |
+| AI Matchmaker | 121 ms | 127 ms | 15 |
+
+**Số truy vấn quan trọng không kém thời gian**: nó gần như không đổi khi kho hồ
+sơ lớn lên. Nếu con số đó bắt đầu tăng theo số ứng viên thì lỗi N+1 đã quay lại,
+và thời gian sẽ sụp ở quy mô thật dù trên máy dev vẫn thấy nhanh. Có bài kiểm
+thử canh riêng việc này (`test/scale.test.js`).
+
+Hai điều đã sửa sau khi đo (xem lịch sử commit):
+
+- Tập ứng viên trước đây dùng `LIMIT` mà **không có `ORDER BY`**, nên SQLite trả
+  về theo thứ tự rowid: mọi người dùng đều nhận đúng một tập ứng viên — những
+  người đăng ký sớm nhất. Ở kho 5.000 hồ sơ, sau 25 người xem khác nhau chỉ có
+  **538 hồ sơ từng xuất hiện**; 89% còn lại vô hình với cả hệ thống. Giờ tập ứng
+  viên được sắp theo khoảng cách trước khi cắt, và con số đó là 4.501/5.000.
+- Mỗi ứng viên tốn 5 truy vấn riêng để tải nhu cầu, luật và trạng thái xác minh.
+  Một lần mở bảng tin với 5.000 ứng viên là 25.000 truy vấn. Giờ tải theo lô: 27.
+
+### Về chỉ mục toạ độ
+
+Không có chỉ mục trên `(lat, lng)`, và đó là chủ ý. Đo ở 50.000 hồ sơ:
+
+| Phân bố người dùng | Không chỉ mục | Có chỉ mục |
+| --- | --- | --- |
+| Dồn vào một thành phố | **26 ms** | 108 ms |
+| Trải khắp cả nước | 15 ms | **5 ms** |
+
+Khi phần lớn người dùng ở cùng một nơi, hộp bao tìm kiếm khớp gần hết số dòng
+nên chỉ mục chỉ thêm một lớp tra cứu ngẫu nhiên. `ANALYZE` không cứu được — bộ
+lập kế hoạch vẫn chọn chỉ mục rồi chậm đi.
+
+Vigo Match mở đăng ký theo từng khu vực nên trường hợp "dồn một thành phố" là
+mặc định. Khi người dùng đã trải ra nhiều tỉnh, bật chỉ mục (câu lệnh có sẵn
+trong `src/db/schema.sql`) rồi **đo lại bằng `npm run bench`** trước khi giữ.
 
 ---
 

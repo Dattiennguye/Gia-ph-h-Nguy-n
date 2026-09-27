@@ -8,3 +8,5 @@ uploads/
 npm-debug.log*
 .DS_Store
 coverage/
+data/bench.db*
+data/bench-uploads/

@@ -9,23 +9,43 @@ import { badRequest, notFound } from '../lib/http.js';
 import { isPremium } from './billing.js';
 
 /**
- * Lấy tập ứng viên thô: những người còn hoạt động, hiển thị công khai, chưa bị
- * chặn hai chiều, và nằm trong hộp bao quanh bán kính tìm kiếm.
+ * Lấy tập ứng viên.
  *
- * Lọc thô bằng SQL trước, rồi mới tính khoảng cách chính xác và điểm phù hợp
- * trong bộ nhớ — vừa nhanh vừa giữ được toàn bộ logic ghép đôi ở một chỗ.
+ * Hai điều quan trọng ở hàm này:
+ *
+ * 1. SẮP XẾP THEO KHOẢNG CÁCH trước khi cắt `LIMIT`. Trước đây câu lệnh có
+ *    `LIMIT` mà không có `ORDER BY`, nên SQLite trả về theo thứ tự rowid — tức
+ *    là mọi người dùng đều nhận đúng một tập ứng viên: những người đăng ký sớm
+ *    nhất. Người đăng ký sau gần như vô hình với toàn hệ thống: không ai nhìn
+ *    thấy nên không ai thích, rồi họ rời đi. Với một app hẹn hò thì đó là lỗi
+ *    chết người, không phải chuyện nhỏ về thứ tự.
+ *
+ *    Khoảng cách dùng để sắp xếp là xấp xỉ mặt phẳng — đủ chính xác ở quy mô
+ *    vài chục km và rẻ hơn nhiều so với haversine viết trong SQL. Khoảng cách
+ *    chính xác vẫn được tính lại ở bước xếp hạng.
+ *
+ * 2. TẢI THEO LÔ. Trước đây mỗi ứng viên tốn 5 câu truy vấn riêng (nhu cầu,
+ *    luật, xác minh, trạng thái). Với 5.000 ứng viên là 25.000 câu cho một lần
+ *    mở bảng tin. Giờ là 3 câu, bất kể kho lớn cỡ nào.
  */
-export function candidatePool(viewer, { radiusKm, includeSeen = false, limit = 500 } = {}) {
+export function candidatePool(viewer, { radiusKm, includeSeen = false, limit = 1500 } = {}) {
   const p = viewer.profile;
   if (p.lat == null || p.lng == null) return [];
 
   const radius = radiusKm ?? viewer.preference?.max_distance_km ?? 20;
   const box = boundingBox(p.lat, p.lng, radius * 1.2);
 
+  // Số km trên mỗi độ, tính sẵn để trong SQL chỉ còn phép nhân.
+  const kmPerLat = 111.32;
+  const kmPerLng = 111.32 * Math.max(0.01, Math.cos((p.lat * Math.PI) / 180));
+
   const seenClause = includeSeen
     ? ''
     : 'AND NOT EXISTS (SELECT 1 FROM likes l WHERE l.from_user = ? AND l.to_user = pr.user_id)';
+
   const params = [
+    p.lat, kmPerLat, p.lat, kmPerLat,
+    p.lng, kmPerLng, p.lng, kmPerLng,
     p.user_id,
     box.minLat, box.maxLat, box.minLng, box.maxLng,
     p.user_id, p.user_id,
@@ -33,7 +53,17 @@ export function candidatePool(viewer, { radiusKm, includeSeen = false, limit = 5
   if (!includeSeen) params.push(p.user_id);
 
   const rows = all(
-    `SELECT pr.* FROM profiles pr
+    `SELECT pr.*,
+            u.last_active_at, u.phone_verified,
+            EXISTS (SELECT 1 FROM verifications v
+                    WHERE v.user_id = pr.user_id AND v.type = 'identity' AND v.status = 'approved')
+              AS identity_verified,
+            EXISTS (SELECT 1 FROM verifications v
+                    WHERE v.user_id = pr.user_id AND v.type = 'photo' AND v.status = 'approved')
+              AS photo_verified,
+            (((pr.lat - ?) * ?) * ((pr.lat - ?) * ?)
+             + ((pr.lng - ?) * ?) * ((pr.lng - ?) * ?)) AS dist_sq
+     FROM profiles pr
      JOIN users u ON u.id = pr.user_id
      WHERE pr.user_id != ?
        AND u.status = 'active'
@@ -44,49 +74,91 @@ export function candidatePool(viewer, { radiusKm, includeSeen = false, limit = 5
                        WHERE (b.user_id = pr.user_id AND b.blocked_id = ?)
                           OR (b.user_id = ? AND b.blocked_id = pr.user_id))
        ${seenClause}
+     ORDER BY dist_sq
      LIMIT ?`,
     [...params, limit]
   );
 
-  return rows.map((row) => {
-    const profile = {
+  if (!rows.length) return [];
+
+  const ids = rows.map((r) => r.user_id);
+  const prefs = loadPreferencesFor(ids);
+  const rules = loadMustRulesFor(ids);
+
+  return rows.map((row) => ({
+    userId: row.user_id,
+    profile: {
       ...row,
       lifestyle_tags: parseJson(row.lifestyle_tags, []),
       interest_tags: parseJson(row.interest_tags, []),
-    };
-    return { userId: row.user_id, profile, preference: loadPref(row.user_id), rules: loadRulesOf(row.user_id) };
-  });
+      identity_verified: Boolean(row.identity_verified),
+      photo_verified: Boolean(row.photo_verified),
+      phone_verified: Boolean(row.phone_verified),
+    },
+    preference: prefs.get(row.user_id) ?? null,
+    rules: rules.get(row.user_id) ?? [],
+  }));
 }
 
-// Tải nhu cầu/luật của ứng viên — cần cho bộ lọc hai chiều.
-function loadPref(userId) {
-  const row = get('SELECT * FROM preferences WHERE user_id = ?', [userId]);
-  return row
-    ? {
+/** SQLite giới hạn số tham số mỗi câu lệnh, nên chia lô khi dùng IN (...). */
+function chunk(items, size = 400) {
+  const out = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+function loadPreferencesFor(ids) {
+  const map = new Map();
+  for (const part of chunk(ids)) {
+    const marks = part.map(() => '?').join(',');
+    for (const row of all(`SELECT * FROM preferences WHERE user_id IN (${marks})`, part)) {
+      map.set(row.user_id, {
         ...row,
         interested_in: parseJson(row.interested_in, []),
         relationship_goals: parseJson(row.relationship_goals, []),
-      }
-    : null;
-}
-function loadRulesOf(userId) {
-  return all('SELECT * FROM preference_rules WHERE user_id = ? AND kind = ?', [userId, 'must']).map(
-    (r) => ({ ...r, value: parseJson(r.value, null) })
-  );
+      });
+    }
+  }
+  return map;
 }
 
-/** Bổ sung cờ xác minh cho hồ sơ ứng viên (dùng trong luật `verified`). */
-function decorate(candidate) {
-  const v = all('SELECT type, status FROM verifications WHERE user_id = ?', [candidate.userId]);
-  candidate.profile.identity_verified = v.some((x) => x.type === 'identity' && x.status === 'approved');
-  candidate.profile.photo_verified = v.some((x) => x.type === 'photo' && x.status === 'approved');
-  candidate.profile.phone_verified = Boolean(
-    get('SELECT phone_verified FROM users WHERE id = ?', [candidate.userId])?.phone_verified
-  );
-  candidate.profile.last_active_at = get('SELECT last_active_at FROM users WHERE id = ?', [
-    candidate.userId,
-  ])?.last_active_at;
-  return candidate;
+function loadMustRulesFor(ids) {
+  const map = new Map();
+  for (const part of chunk(ids)) {
+    const marks = part.map(() => '?').join(',');
+    const rows = all(
+      `SELECT * FROM preference_rules WHERE kind = 'must' AND user_id IN (${marks})`,
+      part
+    );
+    for (const row of rows) {
+      const list = map.get(row.user_id) ?? [];
+      list.push({ ...row, value: parseJson(row.value, null) });
+      map.set(row.user_id, list);
+    }
+  }
+  return map;
+}
+
+/** Tải đầy đủ MỘT ứng viên — dùng khi xem chi tiết một hồ sơ. */
+function loadCandidate(userId, profile) {
+  const types = all(
+    "SELECT type FROM verifications WHERE user_id = ? AND status = 'approved'",
+    [userId]
+  ).map((x) => x.type);
+  const u = get('SELECT last_active_at, phone_verified FROM users WHERE id = ?', [userId]);
+
+  return {
+    userId,
+    profile: {
+      ...profile,
+      identity_verified: types.includes('identity'),
+      photo_verified: types.includes('photo'),
+      phone_verified: Boolean(u?.phone_verified),
+      last_active_at: u?.last_active_at ?? null,
+    },
+    preference: loadPreferencesFor([userId]).get(userId) ?? null,
+    rules: loadMustRulesFor([userId]).get(userId) ?? [],
+  };
 }
 
 /**
@@ -96,8 +168,7 @@ function decorate(candidate) {
 export function rankCandidates(viewer, pool, { radiusKm } = {}) {
   const out = [];
   const t = now();
-  for (const raw of pool) {
-    const candidate = decorate(raw);
+  for (const candidate of pool) {
     const distanceKm = haversineKm(
       viewer.profile.lat, viewer.profile.lng,
       candidate.profile.lat, candidate.profile.lng
@@ -289,6 +360,26 @@ export function nearbyMap(userId, { radiusKm = 10 } = {}) {
   const pool = candidatePool(viewer, { radiusKm: radius, includeSeen: true, limit: 800 });
   const ranked = rankCandidates(viewer, pool, { radiusKm: radius });
 
+  // Bán kính rỗng thì tấm bản đồ trắng trông như app hỏng. Nhìn rộng hơn một
+  // chút để nói được "nới lên X km là có người" — rẻ, vì tập ứng viên đã được
+  // sắp theo khoảng cách sẵn.
+  let suggestion = null;
+  if (!ranked.length) {
+    const wider = Math.min(maxRadius, Math.max(radius * 3, radius + 20));
+    if (wider > radius) {
+      const widerPool = candidatePool(viewer, { radiusKm: wider, includeSeen: true, limit: 800 });
+      const widerRanked = rankCandidates(viewer, widerPool, { radiusKm: wider });
+      if (widerRanked.length) {
+        const nearest = Math.min(...widerRanked.map((e) => e.distanceKm ?? Infinity));
+        suggestion = {
+          radius_km: Math.min(maxRadius, Math.max(1, Math.ceil(nearest / 5) * 5)),
+          count: widerRanked.length,
+          nearest_km: fuzzyDistanceKm(nearest),
+        };
+      }
+    }
+  }
+
   const points = ranked.slice(0, 120).map((e) => {
     const j = jitterPoint(e.candidate.profile.lat, e.candidate.profile.lng, `vigo:${e.candidate.userId}`);
     return {
@@ -319,6 +410,7 @@ export function nearbyMap(userId, { radiusKm = 10 } = {}) {
     max_radius_km: maxRadius,
     points,
     total: ranked.length,
+    suggestion,
   };
 }
 
@@ -360,7 +452,7 @@ export function viewProfile(userId, targetId) {
   const distanceKm = haversineKm(
     viewer.profile.lat, viewer.profile.lng, target.lat, target.lng
   );
-  const candidate = decorate({ userId: targetId, profile: target, preference: loadPref(targetId), rules: loadRulesOf(targetId) });
+  const candidate = loadCandidate(targetId, target);
   const result = scorePair(viewer, candidate, { distanceKm });
   const ex = explain(result);
 

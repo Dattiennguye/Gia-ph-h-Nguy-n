@@ -12,7 +12,8 @@
     "dev": "node --watch src/index.js",
     "seed": "node scripts/seed.js",
     "reset": "node scripts/reset.js",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "bench": "node scripts/bench.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

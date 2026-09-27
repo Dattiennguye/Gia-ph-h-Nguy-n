@@ -117,6 +117,23 @@ CREATE TABLE IF NOT EXISTS profiles (
 CREATE INDEX IF NOT EXISTS idx_profiles_region ON profiles(region_id);
 CREATE INDEX IF NOT EXISTS idx_profiles_goal   ON profiles(relationship_goal);
 
+-- CỐ Ý KHÔNG có chỉ mục trên (lat, lng). Đã đo ở 50.000 hồ sơ:
+--
+--   người dùng dồn về một thành phố  → có chỉ mục CHẬM HƠN 3 lần (26ms → 108ms)
+--   người dùng trải khắp cả nước     → có chỉ mục NHANH HƠN 3 lần (15ms → 5ms)
+--
+-- Lý do: khi phần lớn người dùng ở cùng một nơi, hộp bao tìm kiếm khớp gần hết
+-- số dòng, nên đi qua chỉ mục chỉ thêm một lớp tra cứu ngẫu nhiên; quét tuần tự
+-- nhanh hơn. Chạy ANALYZE cũng không cứu được — bộ lập kế hoạch vẫn chọn chỉ mục
+-- rồi chậm đi.
+--
+-- Vigo Match mở đăng ký theo từng khu vực, nên trường hợp "dồn một thành phố"
+-- mới là mặc định. Khi nào người dùng đã trải ra nhiều tỉnh, hãy bật chỉ mục:
+--
+--   CREATE INDEX idx_profiles_geo ON profiles(lat, lng);
+--
+-- và đo lại bằng `npm run bench` trước khi giữ.
+
 CREATE TABLE IF NOT EXISTS profile_photos (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

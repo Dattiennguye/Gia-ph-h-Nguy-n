@@ -51,6 +51,24 @@ export async function nearbyScreen() {
         )),
       el('p.muted', { style: { marginTop: '12px' }, text: `${data.total} người phù hợp trong bán kính ${data.radius_km} km quanh ${data.center.area ?? 'khu vực của bạn'}.` }),
 
+      // Bán kính rỗng: nói rõ cần nới tới đâu, thay vì để người dùng nhìn một
+      // tấm bản đồ trắng và tưởng app hỏng.
+      !data.total && data.suggestion &&
+        el('div.note.ok', {}, [
+          el('div', { text: `Người phù hợp gần bạn nhất cách khoảng ${data.suggestion.nearest_km} km. Nới lên ${data.suggestion.radius_km} km sẽ thấy ${data.suggestion.count} người.` }),
+          el('button.btn.sm', {
+            style: { marginTop: '10px' },
+            text: `Xem trong ${data.suggestion.radius_km} km`,
+            onclick: () => {
+              sessionStorage.setItem('vigo_map_radius', data.suggestion.radius_km);
+              nearbyScreen();
+            },
+          }),
+        ]),
+
+      !data.total && !data.suggestion &&
+        el('div.note.warn', { text: 'Khu vực của bạn chưa có ai phù hợp. Hãy thử nới các tiêu chí trong phần Nhu cầu, hoặc quay lại sau.' }),
+
       el('div.card', { style: { marginTop: '10px' } },
         data.points.slice(0, 20).map((pt) =>
           el('div.list-item', { onclick: () => go(`#/profile/${pt.user_id}`) }, [
